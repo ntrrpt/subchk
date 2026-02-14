@@ -18,16 +18,19 @@ import (
 )
 
 var (
-	log       zerolog.Logger
-	cliFlags  *flag.FlagSet
-	src       string
-	tmpFolder string
+	log      zerolog.Logger
+	cliFlags *flag.FlagSet
+)
 
-	corePath    string
+// cli flags
+var (
+	src string
+
 	threadCount int
 	speedTest   bool
 	resultCount int
 	sortByPing  bool
+	showFailed  bool
 
 	pingTimeout  int
 	speedTimeout int
@@ -43,14 +46,14 @@ func init() {
 		zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.TimeOnly},
 	).Level(zerolog.TraceLevel).With().Timestamp().Caller().Logger()
 
-	cliFlags = flag.NewFlagSet("cliFlags", flag.ExitOnError)
+	cliFlags = flag.NewFlagSet("subchk", flag.ExitOnError)
 
 	cliFlags.StringVar(&src, "i", "", "path to subscription\n(file or url)")
-	cliFlags.StringVar(&corePath, "x", "", "path to core\n(xray.exe)")
 	cliFlags.IntVar(&threadCount, "t", 2, "number of threads")
 	cliFlags.IntVar(&resultCount, "c", 0, "number of results to be processed\n(default: 0 = print/write all)")
 	cliFlags.BoolVar(&sortByPing, "ps", false, "sorting results by ping, even if speedtest is enabled")
-	cliFlags.StringVar(&outputFile, "o", "", "result output file")
+	cliFlags.StringVar(&outputFile, "o", "", "write result url's to file")
+	cliFlags.BoolVar(&showFailed, "f", false, "show table with failed results")
 
 	cliFlags.StringVar(&pingUrl, "pu", "https://www.google.com/generate_204", "url to ping")
 	cliFlags.IntVar(&pingTimeout, "pt", 5, "ping timeout")
@@ -61,37 +64,14 @@ func init() {
 }
 
 func main() {
-
 	var sub string
+	var err error
 
 	cliFlags.Parse(os.Args[1:])
 
 	if src == "" {
 		log.Fatal().Msg("empty src")
 	}
-
-	corePath = xrayWhich(corePath)
-	if corePath == "" {
-		log.Fatal().Msg("no xray on system")
-	}
-
-	coreVersion, err := xrayVersion(corePath)
-	if err != nil {
-		log.Fatal().
-			Err(err).
-			Str("path", corePath).
-			Msg("wrong xray binary")
-	}
-	log.Info().
-		Str("path", corePath).
-		Str("version", coreVersion).
-		Msg("found xray")
-
-	tmpFolder, err = os.MkdirTemp("", "subchk-*")
-	if err != nil {
-		log.Fatal().Msg("failed to create tmp config")
-	}
-	defer os.Remove(tmpFolder)
 
 	if isFile(src) {
 		sub, err = readFile(src)
@@ -144,24 +124,7 @@ func main() {
 			case 1: // 1st ctrl-c -> cancel future workers
 				log.Info().Msg("stop sending tasks")
 				cancel()
-			case 2: // 2nd ctrl-c -> kill xray's
-				go func() {
-					log.Warn().Str("proc", "xray").Msg("killing procs")
-					num, err := KillProcessesByName("xray")
-					if err != nil {
-						log.Error().
-							Err(err).
-							Str("proc", "xray").
-							Msg("failed to kill procs")
-					} else {
-						log.Info().
-							Err(err).
-							Str("proc", "xray").
-							Int("num", num).
-							Msg("procs killed")
-					}
-				}()
-			case 3: // 3rd ctrl-c -> 腹切り
+			case 2: // 2nd ctrl-c -> 腹切り
 				log.Fatal().Msg("force exit")
 			}
 		}
@@ -223,17 +186,18 @@ func main() {
 		})
 	}
 
+	// show result table
 	var outputUrls []string
 
-	tab := table.NewWriter()
-	tab.SetAutoIndex(true)
-	tab.SetStyle(table.StyleColoredBright)
+	restab := table.NewWriter()
+	restab.SetAutoIndex(true)
+	restab.SetStyle(table.StyleColoredBright)
 
 	tabrow := table.Row{"id", "ip:port", "ping"}
 	if speedTest {
 		tabrow = append(tabrow, "speed", "time", "dwlen")
 	}
-	tab.AppendHeader(tabrow)
+	restab.AppendHeader(tabrow)
 
 	for i, result := range allResults {
 		if resultCount > 0 && i >= resultCount {
@@ -260,41 +224,68 @@ func main() {
 				fmt.Sprintf("%.2f MB", result.dwLen/1024/1024))
 		}
 
-		tab.AppendRow(resInfo)
+		restab.AppendRow(resInfo)
 
 		outputUrls = append(outputUrls, result.Url)
 	}
 
-	if len(outputUrls) == 0 {
-		log.Fatal().Msg("no results")
+	if len(outputUrls) > 0 {
+		fmt.Println(restab.Render())
 	}
 
-	fmt.Println(tab.Render())
+	// show error table
+	if showFailed {
+		errchk := false
+		errtab := table.NewWriter()
+		errtab.SetAutoIndex(true)
+		errtab.SetStyle(table.StyleColoredBlackOnRedWhite)
+		errtab.AppendHeader(table.Row{"id", "ip:port", "error"})
 
-	if outputFile == "" {
-		os.Exit(0)
+		for _, result := range allResults {
+			if result.Error == nil {
+				continue
+			}
+
+			errchk = true
+
+			url, _ := url.Parse(result.Url) // already checked
+			address := fmt.Sprintf("%s:%s", url.Hostname(), url.Port())
+
+			errtab.AppendRow(table.Row{
+				result.ID,
+				address,
+				result.Error,
+			})
+		}
+
+		if errchk {
+			fmt.Println(errtab.Render())
+		}
 	}
 
-	file, err := os.Create(outputFile)
-	if err != nil {
-		log.Panic().
-			Err(err).
+	// write output file
+	if outputFile != "" {
+		file, err := os.Create(outputFile)
+		if err != nil {
+			log.Panic().
+				Err(err).
+				Str("path", outputFile).
+				Msg("failed to create output file")
+		}
+		defer file.Close()
+
+		_, err = file.WriteString(strings.Join(outputUrls, "\n"))
+		if err != nil {
+			log.Panic().
+				Err(err).
+				Str("path", outputFile).
+				Msg("failed to write to output file")
+		}
+
+		log.Info().
 			Str("path", outputFile).
-			Msg("failed to create output file")
+			Msg("writed output file")
 	}
-	defer file.Close()
-
-	_, err = file.WriteString(strings.Join(outputUrls, "\n"))
-	if err != nil {
-		log.Panic().
-			Err(err).
-			Str("path", outputFile).
-			Msg("failed to write to output file")
-	}
-
-	log.Info().
-		Str("path", outputFile).
-		Msg("writed output file")
 
 	os.Exit(0)
 }

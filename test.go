@@ -2,17 +2,16 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
 	"sync"
 	"time"
 
-	"golang.org/x/net/proxy"
+	"github.com/cnlangzi/proxyclient"
+
+	_ "github.com/cnlangzi/proxyclient/xray"
 )
 
 type TestJob struct {
@@ -33,9 +32,6 @@ type TestResult struct {
 func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- TestResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	// todo: check ports for availability
-	port := 10000 + id
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -47,7 +43,7 @@ func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- Tes
 				return
 			}
 
-			data := runTest(job, port)
+			data := runTest(job)
 
 			select {
 			case results <- data:
@@ -58,7 +54,18 @@ func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- Tes
 	}
 }
 
-func runTest(job TestJob, port int) TestResult {
+func WithClientTimeout(duration time.Duration) proxyclient.Option {
+	client := &http.Client{
+		Timeout: duration,
+	}
+
+	return func(o *proxyclient.Options) {
+		o.Client = client
+		o.Timeout = duration
+	}
+}
+
+func runTest(job TestJob) TestResult {
 	result := TestResult{
 		ID:    job.ID,
 		Url:   job.URL,
@@ -69,88 +76,20 @@ func runTest(job TestJob, port int) TestResult {
 		Error: nil,
 	}
 
-	if isPortInUse(port) {
-		result.Error = fmt.Errorf("failed to allocate port: %d", port)
-		log.Error().Err(result.Error).Msg(job.URL)
-		return result
-	}
-
 	url, err := url.Parse(job.URL)
 	if err != nil {
-		result.Error = fmt.Errorf("failed to parse url: %v", err)
+		result.Error = fmt.Errorf("[url] %v", err)
 		log.Error().Err(result.Error).Msg(job.URL)
 		return result
 	}
 
 	address := fmt.Sprintf("[%d] %s:%s", job.ID, url.Hostname(), url.Port())
 
-	// converting url to xray json config
-	config, err := parseUrl(job.URL, port, "", "")
+	client, err := proxyclient.New(job.URL, WithClientTimeout(time.Duration(pingTimeout)*time.Second))
 	if err != nil {
-		result.Error = fmt.Errorf("failed to convert url to json: %v", err)
-		log.Error().Err(result.Error).Msg(address)
+		result.Error = fmt.Errorf("[proxyclient] %v", err)
+		log.Error().Err(result.Error).Msg(job.URL)
 		return result
-	}
-
-	// marshaling json
-	jsonData, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		result.Error = fmt.Errorf("error parsing JSON: %v", err)
-		log.Error().Err(result.Error).Msg(address)
-		return result
-	}
-
-	// create tmp file
-	tmpFile, err := os.CreateTemp(tmpFolder, fmt.Sprintf("subchk-%d-*.json", job.ID))
-	if err != nil {
-		result.Error = fmt.Errorf("failed to create tmp config: %v", err)
-		log.Error().Err(result.Error).Msg(address)
-		return result
-	}
-
-	// writing config
-	tmpFile.WriteString(string(jsonData))
-	tmpFile.Close()
-
-	// creating xray command
-	cmd := exec.Command(corePath, "-c", tmpFile.Name())
-
-	// starting xray in background
-	err = cmd.Start()
-	if err != nil {
-		result.Error = fmt.Errorf("failed to start xray: %v", err)
-		log.Error().Err(result.Error).Msg(address)
-		return result
-	}
-
-	// killing xray in the end
-	defer func() {
-		err = cmd.Process.Kill()
-		if err != nil {
-			log.Printf("failed to kill xray: %v", err)
-		} else {
-			cmd.Process.Wait()
-		}
-	}()
-
-	// waiting for xray to booting
-	time.Sleep(1 * time.Second)
-
-	// creating socks5 dialer
-	dialer, err := proxy.SOCKS5("tcp", fmt.Sprintf("127.0.0.1:%d", port), nil, proxy.Direct)
-	if err != nil {
-		result.Error = fmt.Errorf("failed to create socks5 dialer: %v", err)
-		log.Error().Err(result.Error).Msg(address)
-		return result
-	}
-
-	// http client from socks5
-	transport := &http.Transport{
-		Dial: dialer.Dial,
-	}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   time.Duration(pingTimeout) * time.Second,
 	}
 
 	// ping

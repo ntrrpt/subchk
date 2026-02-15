@@ -43,10 +43,13 @@ func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- Tes
 				return
 			}
 
-			data := runTest(job)
+			result := runTest(job)
+			if showFailed && result.Error != nil {
+				log.Error().Err(result.Error).Msg(urlFix(job.URL))
+			}
 
 			select {
-			case results <- data:
+			case results <- result:
 			case <-ctx.Done():
 				return
 			}
@@ -76,19 +79,16 @@ func runTest(job TestJob) TestResult {
 		Error: nil,
 	}
 
-	url, err := url.Parse(job.URL)
-	if err != nil {
-		result.Error = fmt.Errorf("[url] %v", err)
-		log.Error().Err(result.Error).Msg(job.URL)
+	if _, err := url.Parse(job.URL); err != nil {
+		result.Error = err
 		return result
 	}
 
-	address := fmt.Sprintf("[%d] %s:%s", job.ID, url.Hostname(), url.Port())
+	address := fmt.Sprintf("[%d] %s", job.ID, urlFix(job.URL))
 
 	client, err := proxyclient.New(job.URL, WithClientTimeout(time.Duration(pingTimeout)*time.Second))
 	if err != nil {
-		result.Error = fmt.Errorf("[proxyclient] %v", err)
-		log.Error().Err(result.Error).Msg(job.URL)
+		result.Error = err
 		return result
 	}
 
@@ -97,8 +97,7 @@ func runTest(job TestJob) TestResult {
 	presp, err := client.Get(pingUrl)
 
 	if err != nil {
-		result.Error = fmt.Errorf("[ping] %v", err)
-		log.Error().Err(result.Error).Msg(address)
+		result.Error = err
 		return result
 	}
 	defer presp.Body.Close()
@@ -111,8 +110,7 @@ func runTest(job TestJob) TestResult {
 		sresp, err := client.Get(speedUrl)
 
 		if err != nil {
-			result.Error = fmt.Errorf("[speed] %v", err)
-			log.Error().Err(result.Error).Msg(address)
+			result.Error = err
 			return result
 		}
 		defer sresp.Body.Close()
@@ -123,11 +121,7 @@ func runTest(job TestJob) TestResult {
 		result.dwLen = float64(n)
 
 		if err != nil && result.dwLen == 0 {
-			result.Error = fmt.Errorf("[speed] %v", err)
-			log.Error().
-				Str("transfered", fmt.Sprintf("%.2fMB", result.dwLen/1024/1024)).
-				Err(result.Error).
-				Msg(address)
+			result.Error = err
 			return result
 		}
 

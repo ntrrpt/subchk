@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/rs/zerolog"
 )
 
@@ -26,11 +27,12 @@ var (
 var (
 	src string
 
-	threadCount int
-	speedTest   bool
-	resultCount int
-	sortByPing  bool
-	showFailed  bool
+	threadCount     int
+	speedTest       bool
+	resultCount     int
+	sortByPing      bool
+	showFailed      bool
+	showFailedTable bool
 
 	pingTimeout  int
 	speedTimeout int
@@ -53,7 +55,9 @@ func init() {
 	cliFlags.IntVar(&resultCount, "c", 0, "number of results to be processed\n(default: 0 = print/write all)")
 	cliFlags.BoolVar(&sortByPing, "ps", false, "sorting results by ping, even if speedtest is enabled")
 	cliFlags.StringVar(&outputFile, "o", "", "write result url's to file")
-	cliFlags.BoolVar(&showFailed, "f", false, "show table with failed results")
+
+	cliFlags.BoolVar(&showFailed, "f", false, "show failed results due testing")
+	cliFlags.BoolVar(&showFailedTable, "ft", false, "show table with failed results")
 
 	cliFlags.StringVar(&pingUrl, "pu", "https://www.google.com/generate_204", "url to ping")
 	cliFlags.IntVar(&pingTimeout, "pt", 5, "ping timeout")
@@ -197,6 +201,10 @@ func main() {
 	if speedTest {
 		tabrow = append(tabrow, "speed", "time", "dwlen")
 	}
+	restab.SetColumnConfigs([]table.ColumnConfig{
+		{Number: 1, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
+	})
+
 	restab.AppendHeader(tabrow)
 
 	for i, result := range allResults {
@@ -208,12 +216,9 @@ func main() {
 			continue
 		}
 
-		url, _ := url.Parse(result.Url) // already checked
-		address := fmt.Sprintf("%s:%s", url.Hostname(), url.Port())
-
 		resInfo := table.Row{
 			result.ID,
-			address,
+			urlFix(result.Url),
 			result.Ping,
 		}
 
@@ -230,16 +235,21 @@ func main() {
 	}
 
 	if len(outputUrls) > 0 {
-		fmt.Println(restab.Render())
+		log.Info().Msg("\n" + restab.Render())
 	}
 
 	// show error table
-	if showFailed {
+	if showFailedTable {
 		errchk := false
 		errtab := table.NewWriter()
+
 		errtab.SetAutoIndex(true)
 		errtab.SetStyle(table.StyleColoredBlackOnRedWhite)
 		errtab.AppendHeader(table.Row{"id", "ip:port", "error"})
+		errtab.SetColumnConfigs([]table.ColumnConfig{
+			{Number: 2, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
+			{Number: 3, WidthMax: 100, WidthMaxEnforcer: text.WrapSoft},
+		})
 
 		for _, result := range allResults {
 			if result.Error == nil {
@@ -248,18 +258,15 @@ func main() {
 
 			errchk = true
 
-			url, _ := url.Parse(result.Url) // already checked
-			address := fmt.Sprintf("%s:%s", url.Hostname(), url.Port())
-
 			errtab.AppendRow(table.Row{
 				result.ID,
-				address,
+				urlFix(result.Url),
 				result.Error,
 			})
 		}
 
 		if errchk {
-			fmt.Println(errtab.Render())
+			log.Error().Msg("\n" + errtab.Render())
 		}
 	}
 

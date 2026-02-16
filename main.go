@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/inhies/go-bytesize"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/rs/zerolog"
@@ -40,7 +41,8 @@ var (
 	pingUrl  string
 	speedUrl string
 
-	outputFile string
+	outputFile  string
+	speedFilter string
 )
 
 func init() {
@@ -50,21 +52,22 @@ func init() {
 
 	cliFlags = flag.NewFlagSet("subchk", flag.ExitOnError)
 
-	cliFlags.StringVar(&src, "i", "", "path to subscription\n(file or url)")
-	cliFlags.IntVar(&threadCount, "t", 2, "number of threads")
-	cliFlags.IntVar(&resultCount, "c", 0, "number of results to be processed\n(default: 0 = print/write all)")
-	cliFlags.BoolVar(&sortByPing, "ps", false, "sorting results by ping, even if speedtest is enabled")
-	cliFlags.StringVar(&outputFile, "o", "", "write result url's to file")
+	cliFlags.StringVar(&src, "sub", "", "path to subscription (file or url)")
+	cliFlags.IntVar(&threadCount, "threads", 2, "number of threads")
+	cliFlags.IntVar(&resultCount, "res", 0, "number of proxies to show (default: 0 = print/write all)")
+	cliFlags.BoolVar(&sortByPing, "pingsort", false, "sorting proxies by ping, even if speedtest is enabled")
+	cliFlags.StringVar(&outputFile, "output", "", "write working proxies to file")
 
-	cliFlags.BoolVar(&showFailed, "f", false, "show failed results due testing")
-	cliFlags.BoolVar(&showFailedTable, "ft", false, "show table with failed results")
+	cliFlags.BoolVar(&showFailed, "failed", false, "show dead proxies due testing")
+	cliFlags.BoolVar(&showFailedTable, "failedtable", false, "show table with dead proxies")
 
-	cliFlags.StringVar(&pingUrl, "pu", "https://www.google.com/generate_204", "url to ping")
-	cliFlags.IntVar(&pingTimeout, "pt", 3, "ping timeout")
+	cliFlags.StringVar(&pingUrl, "pingurl", "https://www.google.com/generate_204", "url to ping")
+	cliFlags.IntVar(&pingTimeout, "pingtimeout", 3, "ping timeout")
 
-	cliFlags.BoolVar(&speedTest, "s", false, "enable speed test")
-	cliFlags.StringVar(&speedUrl, "su", "https://speed.cloudflare.com/__down?bytes=10000000", "url for speed test")
-	cliFlags.IntVar(&speedTimeout, "st", 10, "speed test timeout")
+	cliFlags.BoolVar(&speedTest, "speed", false, "enable speed test")
+	cliFlags.StringVar(&speedUrl, "speedurl", "https://speed.cloudflare.com/__down?bytes=10000000", "url for speed test")
+	cliFlags.IntVar(&speedTimeout, "speedtimeout", 10, "speed test timeout")
+	cliFlags.StringVar(&speedFilter, "speedfilter", "", "filter proxies by speed (ex. 10MB, 4096kb)")
 }
 
 func main() {
@@ -74,7 +77,15 @@ func main() {
 	cliFlags.Parse(os.Args[1:])
 
 	if src == "" {
-		log.Fatal().Msg("empty src")
+		cliFlags.Usage()
+		os.Exit(1)
+	}
+
+	if _, err := bytesize.Parse(speedFilter); speedFilter != "" && err != nil {
+		log.Panic().
+			Err(err).
+			Str("speed", speedFilter).
+			Msg("failed to parse speedfilter")
 	}
 
 	if isFile(src) {
@@ -233,6 +244,11 @@ func main() {
 			continue
 		}
 
+		b, _ := bytesize.Parse(speedFilter)
+		if b != 0 && result.Speed != 0 && b > result.Speed {
+			continue
+		}
+
 		resInfo := table.Row{
 			result.ID,
 			urlFix(result.Url),
@@ -241,9 +257,9 @@ func main() {
 
 		if speedTest {
 			resInfo = append(resInfo,
-				fmt.Sprintf("%.2f MB/s", result.Speed),
+				result.Speed.Format("%.2f ", "MB", false),
 				fmt.Sprintf("%.2fs", result.Time),
-				fmt.Sprintf("%.2f MB", result.dwLen/1024/1024))
+				result.dwLen.Format("%.2f ", "MB", false))
 		}
 
 		restab.AppendRow(resInfo)

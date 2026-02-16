@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cnlangzi/proxyclient"
+	"github.com/inhies/go-bytesize"
 
 	_ "github.com/cnlangzi/proxyclient/xray"
 )
@@ -24,9 +25,9 @@ type TestResult struct {
 	Error error
 	Url   string
 	Ping  int64   // milliseconds
-	Speed float64 // MB/s
 	Time  float64 // seconds
-	dwLen float64 // MB
+	Speed bytesize.ByteSize
+	dwLen bytesize.ByteSize
 }
 
 func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- TestResult, wg *sync.WaitGroup) {
@@ -46,24 +47,22 @@ func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- Tes
 			result := runTest(job)
 			address := fmt.Sprintf("[%d] %-30s", job.ID, urlFix(job.URL))
 
-			if result.Error != nil {
-				if showFailed {
-					log.Error().
-						Err(result.Error).
-						Msg(address)
+			if result.Error == nil {
+				l := log.Info().
+					Int64("ping", result.Ping)
+
+				if result.Speed > 0 {
+					l = l.
+						Str("transfered", result.dwLen.Format("%.2f ", "MB", false)).
+						Str("speed", result.Speed.Format("%.2f ", "MB", false)).
+						Str("duration", fmt.Sprintf("%.2fs", result.Time))
 				}
 
-			} else if result.Speed == 0 { // ping only
-				log.Info().
-					Int64("ping", result.Ping).
-					Msg(address)
+				l.Msg(address)
 
-			} else { // with speedtest
-				log.Info().
-					Int64("ping", result.Ping).
-					Str("transfered", fmt.Sprintf("%.2f MB", result.dwLen/1024/1024)).
-					Str("duration", fmt.Sprintf("%.2fs", result.Time)).
-					Str("speed", fmt.Sprintf("%.2f MB/s", result.Speed)).
+			} else if showFailed {
+				log.Error().
+					Err(result.Error).
 					Msg(address)
 			}
 
@@ -112,7 +111,6 @@ func runTest(job TestJob) TestResult {
 	// ping
 	startPing := time.Now()
 	presp, err := client.Get(pingUrl)
-
 	if err != nil {
 		result.Error = err
 		return result
@@ -135,17 +133,21 @@ func runTest(job TestJob) TestResult {
 		startDownload := time.Now()
 		n, err := io.Copy(io.Discard, sresp.Body)
 
-		result.dwLen = float64(n)
+		result.dwLen = bytesize.New(float64(n))
 
 		if err != nil && result.dwLen == 0 {
 			result.Error = err
 			return result
 		}
 
-		// mesaure download speed
+		// measure download speed
 		result.Time = time.Since(startDownload).Seconds()
-		result.Speed = result.dwLen / result.Time / 1024 / 1024 // MB/s
+		if result.Time == 0 {
+			result.Error = fmt.Errorf("empty time, dwLen=%s", result.dwLen.Format("%.0f", "b", false))
+			return result
+		}
 
+		result.Speed = bytesize.New(float64(n) / result.Time)
 	}
 
 	return result

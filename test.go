@@ -44,8 +44,25 @@ func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- Tes
 			}
 
 			result := runTest(job)
+			address := fmt.Sprintf("[%d] %-30s", job.ID, urlFix(job.URL))
+
 			if showFailed && result.Error != nil {
-				log.Error().Err(result.Error).Msg(urlFix(job.URL))
+				log.Error().
+					Err(result.Error).
+					Msg(address)
+
+			} else if result.Speed == 0 { // ping only
+				log.Info().
+					Int64("ping", result.Ping).
+					Msg(address)
+
+			} else { // with speedtest
+				log.Info().
+					Int64("ping", result.Ping).
+					Str("transfered", fmt.Sprintf("%.2f MB", result.dwLen/1024/1024)).
+					Str("duration", fmt.Sprintf("%.2fs", result.Time)).
+					Str("speed", fmt.Sprintf("%.2f MB/s", result.Speed)).
+					Msg(address)
 			}
 
 			select {
@@ -83,8 +100,6 @@ func runTest(job TestJob) TestResult {
 		result.Error = err
 		return result
 	}
-
-	address := fmt.Sprintf("[%d] %s", job.ID, urlFix(job.URL))
 
 	client, err := proxyclient.New(job.URL, WithClientTimeout(time.Duration(pingTimeout)*time.Second))
 	if err != nil {
@@ -128,16 +143,7 @@ func runTest(job TestJob) TestResult {
 		// mesaure download speed
 		result.Time = time.Since(startDownload).Seconds()
 		result.Speed = result.dwLen / result.Time / 1024 / 1024 // MB/s
-		log.Info().
-			Int64("ping", result.Ping).
-			Str("transfered", fmt.Sprintf("%.2f MB", result.dwLen/1024/1024)).
-			Str("duration", fmt.Sprintf("%.2fs", result.Time)).
-			Str("speed", fmt.Sprintf("%.2f MB/s", result.Speed)).
-			Msg(address)
-	} else {
-		log.Info().
-			Int64("ping", result.Ping).
-			Msg(address)
+
 	}
 
 	return result

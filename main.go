@@ -60,7 +60,7 @@ func init() {
 	cliFlags.BoolVar(&showFailedTable, "ft", false, "show table with failed results")
 
 	cliFlags.StringVar(&pingUrl, "pu", "https://www.google.com/generate_204", "url to ping")
-	cliFlags.IntVar(&pingTimeout, "pt", 5, "ping timeout")
+	cliFlags.IntVar(&pingTimeout, "pt", 3, "ping timeout")
 
 	cliFlags.BoolVar(&speedTest, "s", false, "enable speed test")
 	cliFlags.StringVar(&speedUrl, "su", "https://speed.cloudflare.com/__down?bytes=10000000", "url for speed test")
@@ -190,24 +190,41 @@ func main() {
 		})
 	}
 
-	// show result table
+	// show tables with good / bad proxies
 	var outputUrls []string
 
 	restab := table.NewWriter()
 	restab.SetAutoIndex(true)
 	restab.SetStyle(table.StyleColoredBright)
-
-	tabrow := table.Row{"id", "ip:port", "ping"}
+	resrow := table.Row{"id", "ip:port", "ping"}
 	if speedTest {
-		tabrow = append(tabrow, "speed", "time", "dwlen")
+		resrow = append(resrow, "speed", "time", "dwlen")
 	}
+	restab.AppendHeader(resrow)
 	restab.SetColumnConfigs([]table.ColumnConfig{
 		{Number: 1, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
 	})
 
-	restab.AppendHeader(tabrow)
+	errtab := table.NewWriter()
+	errtab.SetAutoIndex(true)
+	errtab.SetStyle(table.StyleColoredBlackOnRedWhite)
+	errtab.AppendHeader(table.Row{"id", "ip:port", "error"})
+	errtab.SetColumnConfigs([]table.ColumnConfig{
+		{Number: 2, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
+		{Number: 3, WidthMax: 100, WidthMaxEnforcer: text.WrapSoft},
+	})
 
 	for i, result := range allResults {
+		if result.Error != nil {
+			errtab.AppendRow(table.Row{
+				result.ID,
+				urlFix(result.Url),
+				result.Error,
+			})
+
+			continue
+		}
+
 		if resultCount > 0 && i >= resultCount {
 			continue
 		}
@@ -235,39 +252,11 @@ func main() {
 	}
 
 	if len(outputUrls) > 0 {
-		log.Info().Msg("\n" + restab.Render())
+		log.Info().Msg("results:\n" + restab.Render())
 	}
 
-	// show error table
 	if showFailedTable {
-		errchk := false
-		errtab := table.NewWriter()
-
-		errtab.SetAutoIndex(true)
-		errtab.SetStyle(table.StyleColoredBlackOnRedWhite)
-		errtab.AppendHeader(table.Row{"id", "ip:port", "error"})
-		errtab.SetColumnConfigs([]table.ColumnConfig{
-			{Number: 2, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
-			{Number: 3, WidthMax: 100, WidthMaxEnforcer: text.WrapSoft},
-		})
-
-		for _, result := range allResults {
-			if result.Error == nil {
-				continue
-			}
-
-			errchk = true
-
-			errtab.AppendRow(table.Row{
-				result.ID,
-				urlFix(result.Url),
-				result.Error,
-			})
-		}
-
-		if errchk {
-			log.Error().Msg("\n" + errtab.Render())
-		}
+		log.Error().Msg("errors:\n" + errtab.Render())
 	}
 
 	// write output file

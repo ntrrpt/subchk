@@ -32,9 +32,9 @@ func (b *base64Url) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	b.Host = aux.Host
+	b.Host = aux.Add
 	if b.Host == "" {
-		b.Host = aux.Add
+		b.Host = aux.Host // should not happen
 	}
 
 	switch v := aux.Port.(type) {
@@ -101,7 +101,7 @@ func urlFix(u string) string {
 		ret = fmt.Sprintf("%s://%s", pu.Scheme, ret)
 	}
 
-	return fmt.Sprintf("[b64] %s", ret)
+	return ret
 }
 
 // github.com/davecgh/go-spew/spew

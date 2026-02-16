@@ -46,10 +46,12 @@ func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- Tes
 			result := runTest(job)
 			address := fmt.Sprintf("[%d] %-30s", job.ID, urlFix(job.URL))
 
-			if showFailed && result.Error != nil {
-				log.Error().
-					Err(result.Error).
-					Msg(address)
+			if result.Error != nil {
+				if showFailed {
+					log.Error().
+						Err(result.Error).
+						Msg(address)
+				}
 
 			} else if result.Speed == 0 { // ping only
 				log.Info().

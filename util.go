@@ -104,12 +104,6 @@ func urlFix(u string) string {
 	return ret
 }
 
-// github.com/davecgh/go-spew/spew
-func prettyPrint(i any) string {
-	s, _ := json.MarshalIndent(i, "", "\t")
-	return string(s)
-}
-
 func urlGet(url string) (string, error) {
 	resp, err := http.Get(url)
 	if err != nil {

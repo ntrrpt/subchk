@@ -60,7 +60,7 @@ func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- Tes
 
 				l.Msg(address)
 
-			} else if showFailed {
+			} else if cfg.showFailed {
 				log.Error().
 					Err(result.Error).
 					Msg(address)
@@ -102,7 +102,8 @@ func runTest(job TestJob) TestResult {
 		return result
 	}
 
-	client, err := proxyclient.New(job.URL, WithClientTimeout(time.Duration(pingTimeout)*time.Second))
+	dur := time.Duration(cfg.pingTimeout) * time.Second
+	client, err := proxyclient.New(job.URL, WithClientTimeout(dur))
 	if err != nil {
 		result.Error = err
 		return result
@@ -110,7 +111,7 @@ func runTest(job TestJob) TestResult {
 
 	// ping
 	startPing := time.Now()
-	presp, err := client.Get(pingUrl)
+	presp, err := client.Get(cfg.pingUrl)
 	if err != nil {
 		result.Error = err
 		return result
@@ -119,10 +120,10 @@ func runTest(job TestJob) TestResult {
 
 	result.Ping = time.Since(startPing).Milliseconds()
 
-	if speedTest {
+	if cfg.speedTest {
 		// downloading test file
-		client.Timeout = time.Duration(speedTimeout) * time.Second
-		sresp, err := client.Get(speedUrl)
+		client.Timeout = time.Duration(cfg.speedTimeout) * time.Second
+		sresp, err := client.Get(cfg.speedUrl)
 
 		if err != nil {
 			result.Error = err

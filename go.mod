@@ -5,6 +5,7 @@ go 1.25.4
 require github.com/rs/zerolog v1.34.0
 
 require (
+	github.com/akamensky/argparse v1.4.0 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
 	github.com/cloudflare/circl v1.6.2 // indirect

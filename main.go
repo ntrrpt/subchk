@@ -1,15 +1,11 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"os"
-	"os/signal"
 	"slices"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
 
 	"github.com/akamensky/argparse"
@@ -28,6 +24,7 @@ type Config struct {
 	/* global */
 	input       string
 	outputFile  string
+	serveFile   string
 	threadCount int
 
 	/* results */
@@ -52,12 +49,16 @@ func parseArgs() *Config {
 
 	/* global */
 	input := parser.String("i", "input", &argparse.Options{
-		Required: true,
+		Required: false,
 		Help:     "url or file with proxies",
 	})
 	outputFile := parser.String("o", "output", &argparse.Options{
 		Required: false,
 		Help:     "write working proxies to file",
+	})
+	serveFile := parser.String("e", "server", &argparse.Options{
+		Required: false,
+		Help:     "run http server with output file content (:PORT or HOST:PORT)",
 	})
 	threadCount := parser.Int("t", "threads", &argparse.Options{
 		Required: false,
@@ -124,6 +125,7 @@ func parseArgs() *Config {
 		/* global */
 		input:       *input,
 		outputFile:  *outputFile,
+		serveFile:   *serveFile,
 		threadCount: *threadCount,
 		/* results */
 		resCount:        *resCount,
@@ -153,6 +155,22 @@ func main() {
 	var sub string
 	var err error
 
+	if cfg.outputFile != "" && cfg.serveFile != "" {
+		if serveFile(cfg.outputFile, cfg.serveFile) != nil {
+			log.Panic().
+				Err(err).
+				Str("outputFile", cfg.outputFile).
+				Str("addr", cfg.serveFile).
+				Msg("failed to start server")
+		}
+		os.Exit(0)
+	}
+
+	if cfg.input == "" {
+		log.Fatal().
+			Msg("input file/url is empty (see --help)")
+	}
+
 	if _, err := bytesize.Parse(cfg.speedFilter); cfg.speedFilter != "" && err != nil {
 		log.Panic().
 			Err(err).
@@ -169,7 +187,9 @@ func main() {
 				Str("path", cfg.input).
 				Msg("failed to read file")
 		}
-		log.Info().Str("input", cfg.input).Msg("file loaded")
+		log.Info().
+			Str("input", cfg.input).
+			Msg("file loaded")
 
 	} else {
 		_, err := url.Parse(cfg.input)
@@ -188,7 +208,9 @@ func main() {
 				Msg("failed to fetch sub")
 		}
 
-		log.Info().Str("input", cfg.input).Msg("url loaded")
+		log.Info().
+			Str("input", cfg.input).
+			Msg("url loaded")
 	}
 
 	urls := strings.Split(strings.ReplaceAll(sub, "\r\n", "\n"), "\n")
@@ -197,59 +219,10 @@ func main() {
 		Int("threads", cfg.threadCount).
 		Msg("starting")
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		sigCount := 0
-		for range sigCh {
-			sigCount++
-
-			switch sigCount {
-			case 1: // 1st ctrl-c -> cancel workers
-				log.Info().Msg("stop sending tasks")
-				cancel()
-			case 2: // 2nd ctrl-c -> 腹切り
-				log.Fatal().Msg("force exit")
-			}
-		}
-	}()
-
-	jobs := make(chan TestJob)
-	results := make(chan TestResult, len(urls))
-	var wg sync.WaitGroup
-
-	for w := 1; w <= cfg.threadCount; w++ {
-		wg.Add(1)
-		go worker(ctx, w, jobs, results, &wg)
-	}
-
-	go func() {
-		defer close(jobs)
-		for i, url := range urls {
-			if url == "" {
-				continue
-			}
-
-			select {
-			case jobs <- TestJob{ID: i, URL: url}:
-			case <-ctx.Done():
-				log.Warn().Msg("stopped submitting jobs")
-				return
-			}
-		}
-	}()
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
+	results := runJobs(urls)
 
 	var allResults []TestResult
 
-	// appendind all results
 	for res := range results {
 		allResults = append(allResults, res)
 	}
@@ -340,11 +313,13 @@ func main() {
 	}
 
 	if len(outputUrls) > 0 {
-		log.Info().Msg("results:\n" + restab.Render())
+		log.Info().
+			Msg("results:\n" + restab.Render())
 	}
 
 	if cfg.showFailedTable {
-		log.Error().Msg("errors:\n" + errtab.Render())
+		log.Error().
+			Msg("errors:\n" + errtab.Render())
 	}
 
 	// write output file

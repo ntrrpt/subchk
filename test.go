@@ -6,7 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/cnlangzi/proxyclient"
@@ -30,13 +33,69 @@ type TestResult struct {
 	dwLen bytesize.ByteSize
 }
 
+func runJobs(urls []string) chan TestResult {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		sigCount := 0
+
+		for range sigCh {
+			sigCount++
+
+			switch sigCount {
+			case 1: // 1st ctrl-c -> cancel workers
+				log.Info().Msg("stop sending tasks")
+				cancel()
+			case 2: // 2nd ctrl-c -> 腹切り
+				log.Fatal().Msg("force exit")
+			}
+		}
+	}()
+
+	jobs := make(chan TestJob)
+	results := make(chan TestResult, len(urls))
+	var wg sync.WaitGroup
+
+	for w := 1; w <= cfg.threadCount; w++ {
+		wg.Add(1)
+		go worker(ctx, w, jobs, results, &wg)
+	}
+
+	go func() {
+		defer close(jobs)
+		for i, url := range urls {
+			if url == "" {
+				continue
+			}
+
+			select {
+			case jobs <- TestJob{ID: i, URL: url}:
+			case <-ctx.Done():
+				log.Warn().Msg("stopped submitting jobs")
+				return
+			}
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	return results
+}
+
 func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- TestResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Warn().Msgf("worker %d shutting down...", id)
+			log.Warn().
+				Msgf("worker %d shutting down...", id)
 			return
 
 		case job, ok := <-jobs:

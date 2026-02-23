@@ -58,7 +58,7 @@ func parseArgs() *Config {
 	})
 	serveFile := parser.String("e", "server", &argparse.Options{
 		Required: false,
-		Help:     "run http server with output file content (:PORT or HOST:PORT)",
+		Help:     "run http server with output file content (:PORT or HOST:PORT, need -o)",
 	})
 	threadCount := parser.Int("t", "threads", &argparse.Options{
 		Required: false,
@@ -156,7 +156,8 @@ func main() {
 	var err error
 
 	if cfg.outputFile != "" && cfg.serveFile != "" {
-		if serveFile(cfg.outputFile, cfg.serveFile) != nil {
+		err = serveFile(cfg.outputFile, cfg.serveFile)
+		if err != nil {
 			log.Panic().
 				Err(err).
 				Str("outputFile", cfg.outputFile).
@@ -168,7 +169,7 @@ func main() {
 
 	if cfg.input == "" {
 		log.Fatal().
-			Msg("input file/url is empty (see --help)")
+			Msg("input file/url is empty (see -h, --help)")
 	}
 
 	if _, err := bytesize.Parse(cfg.speedFilter); cfg.speedFilter != "" && err != nil {

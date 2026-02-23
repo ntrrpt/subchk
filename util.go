@@ -55,8 +55,7 @@ func (b *base64Url) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// return "scheme://host:port" from url object
-// return "[b64] scheme://host:port" if encoded with base64
+// return "scheme://host:port" from proxy url
 func urlFix(u string) string {
 	ret := u
 	isBase64 := ""
@@ -66,7 +65,7 @@ func urlFix(u string) string {
 		return ret
 	}
 
-	raw := strings.TrimPrefix(u, pu.Scheme+"://") // cuz url.Parse trimming "/"
+	raw := strings.TrimPrefix(u, pu.Scheme+"://") // because url.Parse trimming "/"
 
 	if d, err := base64.StdEncoding.DecodeString(raw); err == nil {
 		isBase64 = string(d)
@@ -91,7 +90,10 @@ func urlFix(u string) string {
 	var b64Url base64Url
 	err = json.Unmarshal([]byte(isBase64), &b64Url)
 	if err != nil {
-		log.Debug().Str("json", isBase64).Err(err).Send()
+		log.Trace().
+			Str("json", isBase64).
+			Err(err).
+			Send()
 		return ret
 	}
 

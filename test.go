@@ -119,7 +119,7 @@ func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- Tes
 
 				l.Msg(address)
 
-			} else if cfg.showFailed {
+			} else if cfg.verbose {
 				log.Error().
 					Err(result.Error).
 					Msg(address)

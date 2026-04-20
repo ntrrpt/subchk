@@ -1,0 +1,127 @@
+package main
+
+import (
+	"os"
+
+	"github.com/akamensky/argparse"
+)
+
+type Config struct {
+	/* global */
+	input       string
+	outputFile  string
+	serveFile   string
+	threadCount int
+	verbose     bool
+
+	/* results */
+	resCount int
+
+	/* ping */
+	pingSort    bool
+	pingUrl     string
+	pingTimeout int
+
+	/* speed */
+	speedTest    bool
+	speedTimeout int
+	speedUrl     string
+	speedFilter  string
+}
+
+func parseArgs() *Config {
+	parser := argparse.NewParser("subchk", "xray subs tester")
+
+	/* global */
+	input := parser.String("i", "input", &argparse.Options{
+		Required: false,
+		Help:     "url or file with proxies",
+	})
+	outputFile := parser.String("o", "output", &argparse.Options{
+		Required: false,
+		Help:     "write working proxies to file",
+	})
+	serveFile := parser.String("e", "server", &argparse.Options{
+		Required: false,
+		Help:     "run http server with output file content (:PORT or HOST:PORT, need -o)",
+	})
+	threadCount := parser.Int("t", "threads", &argparse.Options{
+		Required: false,
+		Help:     "number of threads",
+		Default:  5,
+	})
+	verbose := parser.Flag("v", "verbose", &argparse.Options{
+		Required: false,
+		Help:     "debug info",
+	})
+
+	/* results */
+	resCount := parser.Int("r", "results", &argparse.Options{
+		Required: false,
+		Help:     "number of proxies to show in result table and write to output file (0 = print/write all)",
+		Default:  0,
+	})
+
+	/* ping */
+	pingSort := parser.Flag("p", "pingsort", &argparse.Options{
+		Required: false,
+		Help:     "sorting proxies by ping, even if speedtest is enabled",
+	})
+	pingUrl := parser.String("", "purl", &argparse.Options{
+		Required: false,
+		Help:     "url to ping",
+		Default:  "https://www.google.com/generate_204",
+	})
+	pingTimeout := parser.Int("", "ptimeout", &argparse.Options{
+		Required: false,
+		Help:     "ping timeout",
+		Default:  3,
+	})
+
+	/* speed */
+	speedTest := parser.Flag("s", "speed", &argparse.Options{
+		Required: false,
+		Help:     "enable speed test",
+	})
+	speedTimeout := parser.Int("", "stimeout", &argparse.Options{
+		Required: false,
+		Help:     "speed test timeout",
+		Default:  10,
+	})
+	speedUrl := parser.String("", "surl", &argparse.Options{
+		Required: false,
+		Help:     "url for speed test",
+		Default:  "https://speed.cloudflare.com/__down?bytes=10000000",
+	})
+	speedFilter := parser.String("", "sfilter", &argparse.Options{
+		Required: false,
+		Help:     "filter proxies by speed (ex. 10MB, 4096kb)",
+	})
+
+	if err := parser.Parse(os.Args); err != nil {
+		log.Fatal().Msg(parser.Usage(err))
+	}
+
+	return &Config{
+		/* global */
+		input:       *input,
+		outputFile:  *outputFile,
+		serveFile:   *serveFile,
+		threadCount: *threadCount,
+		verbose:     *verbose,
+
+		/* results */
+		resCount: *resCount,
+
+		/* ping */
+		pingSort:    *pingSort,
+		pingUrl:     *pingUrl,
+		pingTimeout: *pingTimeout,
+
+		/* speed */
+		speedTest:    *speedTest,
+		speedTimeout: *speedTimeout,
+		speedUrl:     *speedUrl,
+		speedFilter:  *speedFilter,
+	}
+}

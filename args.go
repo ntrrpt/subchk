@@ -12,7 +12,8 @@ type Config struct {
 	outputFile  string
 	serveFile   string
 	threadCount int
-	verbose     bool
+	debug       bool
+	trace       bool
 
 	/* results */
 	resCount int
@@ -43,16 +44,20 @@ func parseArgs() *Config {
 	})
 	serveFile := parser.String("e", "server", &argparse.Options{
 		Required: false,
-		Help:     "run http server with output file content (:PORT or HOST:PORT, need -o)",
+		Help:     "run http server with output file content (PORT or HOST:PORT, require -o)",
 	})
 	threadCount := parser.Int("t", "threads", &argparse.Options{
 		Required: false,
 		Help:     "number of threads",
 		Default:  5,
 	})
-	verbose := parser.Flag("v", "verbose", &argparse.Options{
+	debug := parser.Flag("v", "debug", &argparse.Options{
 		Required: false,
-		Help:     "debug info",
+		Help:     "debug logging (show dead proxies due testing)",
+	})
+	trace := parser.Flag("", "trace", &argparse.Options{
+		Required: false,
+		Help:     "trace logging (show table with dead proxies)",
 	})
 
 	/* results */
@@ -99,7 +104,8 @@ func parseArgs() *Config {
 	})
 
 	if err := parser.Parse(os.Args); err != nil {
-		log.Fatal().Msg(parser.Usage(err))
+		println(parser.Usage(err))
+		os.Exit(1)
 	}
 
 	return &Config{
@@ -108,7 +114,8 @@ func parseArgs() *Config {
 		outputFile:  *outputFile,
 		serveFile:   *serveFile,
 		threadCount: *threadCount,
-		verbose:     *verbose,
+		debug:       *debug,
+		trace:       *trace,
 
 		/* results */
 		resCount: *resCount,

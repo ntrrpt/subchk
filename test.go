@@ -47,7 +47,7 @@ func runJobs(urls []string) chan TestResult {
 
 			switch sigCount {
 			case 1: // 1st ctrl-c -> cancel workers
-				log.Info().Msg("stop sending tasks")
+				log.Info().Msg("stopped sending tasks")
 				cancel()
 			case 2: // 2nd ctrl-c -> 腹切り
 				log.Fatal().Msg("force exit")
@@ -66,13 +66,25 @@ func runJobs(urls []string) chan TestResult {
 
 	go func() {
 		defer close(jobs)
-		for i, url := range urls {
-			if url == "" {
+		for i, _url := range urls {
+			if _url == "" {
+				log.Trace().
+					Int("_id", i).
+					Msg("empty url")
+				continue
+			}
+
+			if _, err := url.Parse(_url); err != nil {
+				log.Trace().
+					Int("_id", i).
+					Str("url", _url).
+					Err(err).
+					Msg("invalid url")
 				continue
 			}
 
 			select {
-			case jobs <- TestJob{ID: i, URL: url}:
+			case jobs <- TestJob{ID: i, URL: _url}:
 			case <-ctx.Done():
 				log.Warn().Msg("stopped submitting jobs")
 				return
@@ -104,11 +116,16 @@ func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- Tes
 			}
 
 			result := runTest(job)
-			address := fmt.Sprintf("[%d] %-30s", job.ID, urlFix(job.URL))
+			address := fmt.Sprintf("%-30s", urlFix(job.URL))
 
 			if result.Error == nil {
 				l := log.Info().
+					Int("id", result.ID).
 					Int64("ping", result.Ping)
+
+				if cfg.trace {
+					l = l.Str("url", job.URL)
+				}
 
 				if result.Speed > 0 {
 					l = l.
@@ -119,10 +136,16 @@ func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- Tes
 
 				l.Msg(address)
 
-			} else if cfg.verbose {
-				log.Error().
-					Err(result.Error).
-					Msg(address)
+			} else if cfg.debug || cfg.trace {
+				l := log.Error().
+					Int("id", result.ID).
+					Err(result.Error)
+
+				if cfg.trace {
+					l = l.Str("url", job.URL)
+				}
+
+				l.Msg(address)
 			}
 
 			select {

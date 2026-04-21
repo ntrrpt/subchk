@@ -20,6 +20,31 @@ type base64Url struct {
 // for unused vars
 func U(x ...any) {}
 
+/*
+extracts first page from table with "RAWURL" column header
+
+	RAWURLxxxxxxxxxxxxRAWURLyyyyyyyy => xxxxxxxxxxxx
+	RAWURLzzzzzzzzzzzz => zzzzzzzzzzzz
+*/
+func extractRawUrl(s string) string {
+	const marker = "RAWURL"
+
+	start := strings.Index(s, marker)
+	if start == -1 {
+		return ""
+	}
+
+	start += len(marker)
+
+	end := strings.Index(s[start:], marker)
+
+	if end == -1 {
+		return strings.TrimSpace(s[start:])
+	}
+
+	return strings.TrimSpace(s[start : start+end])
+}
+
 // {float,string} to integer
 func (b *base64Url) UnmarshalJSON(data []byte) error {
 	var aux struct {
@@ -94,6 +119,7 @@ func urlFix(u string) string {
 			Str("json", isBase64).
 			Err(err).
 			Send()
+
 		return ret
 	}
 

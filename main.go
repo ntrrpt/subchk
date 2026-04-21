@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -20,16 +19,26 @@ var (
 )
 
 func init() {
-	log = zerolog.New(
-		zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.TimeOnly},
-	).Level(zerolog.InfoLevel).With().Timestamp().Logger()
-
 	cfg = parseArgs()
 
-	if cfg.verbose {
+	if cfg.trace {
+
+		log = zerolog.New(
+			zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.DateTime},
+		).Level(zerolog.TraceLevel).With().Timestamp().Caller().Logger()
+
+	} else if cfg.debug {
+
 		log = zerolog.New(
 			zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.TimeOnly},
-		).Level(zerolog.TraceLevel).With().Timestamp().Caller().Logger()
+		).Level(zerolog.DebugLevel).With().Timestamp().Logger()
+
+	} else {
+
+		log = zerolog.New(
+			zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.TimeOnly},
+		).Level(zerolog.InfoLevel).With().Timestamp().Logger()
+
 	}
 }
 
@@ -54,7 +63,8 @@ func main() {
 			Msg("input file/url is empty (see -h, --help)")
 	}
 
-	if _, err := bytesize.Parse(cfg.speedFilter); cfg.speedFilter != "" && err != nil {
+	speedFilter, err := bytesize.Parse(cfg.speedFilter)
+	if cfg.speedFilter != "" && err != nil {
 		log.Panic().
 			Err(err).
 			Str("speed", cfg.speedFilter).
@@ -102,46 +112,24 @@ func main() {
 		Int("threads", cfg.threadCount).
 		Msg("starting")
 
-	results := runJobs(urls)
+	results := make([]TestResult, 0)
 
-	var allResults []TestResult
-
-	for res := range results {
-		allResults = append(allResults, res)
+	for res := range runJobs(urls) {
+		results = append(results, res)
 	}
-
-	// sort by ping
-	slices.SortFunc(allResults, func(a, b TestResult) int {
-		return int(a.Ping - b.Ping)
-	})
-
-	// sort by speed
-	if cfg.speedTest && !cfg.pingSort {
-		slices.SortFunc(allResults, func(a, b TestResult) int {
-			switch {
-			case a.Speed < b.Speed:
-				return 1
-			case a.Speed > b.Speed:
-				return -1
-			default:
-				return 0
-			}
-		})
-	}
-
-	// show tables with good / bad proxies
-	var outputUrls []string
 
 	restab := table.NewWriter()
 	restab.SetAutoIndex(true)
 	restab.SetStyle(table.StyleColoredBright)
-	resrow := table.Row{"id", "url", "ping"}
+	resrow := table.Row{"rawUrl", "rawSpeed", "id", "url", "ping"}
 	if cfg.speedTest {
 		resrow = append(resrow, "speed", "time", "dwlen")
 	}
 	restab.AppendHeader(resrow)
 	restab.SetColumnConfigs([]table.ColumnConfig{
-		{Number: 1, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
+		{Number: 1, Hidden: true},
+		{Number: 2, Hidden: true},
+		{Number: 4, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
 	})
 
 	errtab := table.NewWriter()
@@ -149,38 +137,23 @@ func main() {
 	errtab.SetStyle(table.StyleColoredBlackOnRedWhite)
 	errtab.AppendHeader(table.Row{"id", "url", "error"})
 	errtab.SetColumnConfigs([]table.ColumnConfig{
-		{Number: 2, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
-		{Number: 3, WidthMax: 100, WidthMaxEnforcer: text.WrapSoft},
+		{Number: 1, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
+		{Number: 2, WidthMax: 100, WidthMaxEnforcer: text.WrapSoft},
 	})
 
-	for i, result := range allResults {
+	var dwLenTotal bytesize.ByteSize
+
+	for _, result := range results {
 		if result.Error != nil {
 			errtab.AppendRow(table.Row{
-				result.ID,
-				urlFix(result.Url),
-				result.Error,
+				result.ID, urlFix(result.Url), result.Error,
 			})
 
 			continue
 		}
 
-		if cfg.resCount > 0 && i >= cfg.resCount {
-			continue
-		}
-
-		if result.Ping == 0 {
-			continue
-		}
-
-		b, _ := bytesize.Parse(cfg.speedFilter)
-		if b != 0 && result.Speed != 0 && b > result.Speed {
-			continue
-		}
-
 		resInfo := table.Row{
-			result.ID,
-			urlFix(result.Url),
-			result.Ping,
+			result.Url, result.Speed, result.ID, urlFix(result.Url), result.Ping,
 		}
 
 		if cfg.speedTest {
@@ -190,23 +163,139 @@ func main() {
 				result.dwLen.Format("%.2f ", "MB", false))
 		}
 
+		dwLenTotal += result.dwLen
+
 		restab.AppendRow(resInfo)
-
-		outputUrls = append(outputUrls, result.Url)
 	}
 
-	if len(outputUrls) > 0 {
-		log.Info().
-			Msg("results:\n" + restab.Render())
+	// filtering by zero ping
+	restab.FilterBy([]table.FilterBy{
+		{Name: "ping", Operator: table.NotEqual, Value: 0},
+	})
+
+	// sort by ping
+	restab.SortBy([]table.SortBy{
+		{Name: "ping", Mode: table.AscNumeric},
+	})
+
+	// filtering by speed
+	if cfg.speedTest && speedFilter != 0 {
+		restab.FilterBy([]table.FilterBy{
+			{
+				Number: 2,
+				CustomFilter: func(rawSpeed string) bool {
+					b, err := bytesize.Parse(rawSpeed)
+					if err == nil && b != 0 && b >= speedFilter {
+						return true
+					}
+					return false
+				},
+			},
+		})
 	}
 
-	if cfg.verbose {
-		log.Error().
-			Msg("errors:\n" + errtab.Render())
+	// sort by speed
+	if cfg.speedTest && !cfg.pingSort {
+		restab.SortBy([]table.SortBy{
+			{
+				Number: 2,
+				CustomLess: func(iStr string, jStr string) int {
+					iNum, iErr := bytesize.Parse(iStr)
+					jNum, jErr := bytesize.Parse(jStr)
+
+					if iErr != nil || jErr != nil {
+						// fallback to string comparison if not numeric
+						if iStr < jStr {
+							return 1
+						}
+						if iStr > jStr {
+							return -1
+						}
+						return 0
+					}
+
+					if iNum < jNum {
+						return 1
+					}
+					if iNum > jNum {
+						return -1
+					}
+					return 0
+				},
+			},
+		})
+
 	}
 
-	// write output file
-	if cfg.outputFile != "" {
+	if cfg.trace && errtab.Length() > 0 {
+		errtab.SortBy([]table.SortBy{
+			{Number: 1, Mode: table.AscNumeric},
+		})
+
+		println(errtab.Render())
+	}
+
+	if restab.Length() > 0 {
+		restabRender := restab.Render()
+		if cfg.resCount > 0 {
+			restab.SetPageSize(cfg.resCount)
+			restabRender = strings.SplitN(restab.Render(), "\n\n", 2)[0]
+		}
+		println(restabRender)
+	}
+
+	log.Info().
+		Str("dwLenTotal", dwLenTotal.Format("%.2f ", "MB", false)).
+		Msg("finished")
+
+	// clean style without colors and borders
+	emptyStyle := table.Style{
+		Name: "emptyStyle",
+		Box: table.BoxStyle{
+			BottomLeft:       "",
+			BottomRight:      "",
+			BottomSeparator:  "",
+			EmptySeparator:   "",
+			Left:             "",
+			LeftSeparator:    "",
+			MiddleHorizontal: "",
+			MiddleSeparator:  "",
+			MiddleVertical:   "",
+			PaddingLeft:      "",
+			PaddingRight:     "",
+			PageSeparator:    "",
+			Right:            "",
+			RightSeparator:   "",
+			TopLeft:          "",
+			TopRight:         "",
+			TopSeparator:     "",
+			UnfinishedRow:    "",
+		},
+		Color:   table.ColorOptionsDefault,
+		Format:  table.FormatOptionsDefault,
+		HTML:    table.DefaultHTMLOptions,
+		Options: table.OptionsNoBordersAndSeparators,
+		Size:    table.SizeOptionsDefault,
+		Title:   table.TitleOptionsDefault,
+	}
+
+	restab.SetAutoIndex(false)
+	restab.SetColumnConfigs([]table.ColumnConfig{
+		{Number: 1, Hidden: false},
+		{Number: 2, Hidden: true},
+		{Number: 3, Hidden: true},
+		{Number: 4, Hidden: true},
+		{Number: 5, Hidden: true},
+		{Number: 6, Hidden: true},
+		{Number: 7, Hidden: true},
+		{Number: 8, Hidden: true},
+		{Number: 9, Hidden: true},
+	})
+	restab.SetStyle(emptyStyle)
+	restabTxtRender := extractRawUrl(restab.Render())
+
+	//write output file
+	if cfg.outputFile != "" && len(restabTxtRender) > 0 {
 		file, err := os.Create(cfg.outputFile)
 		if err != nil {
 			log.Panic().
@@ -216,7 +305,7 @@ func main() {
 		}
 		defer file.Close()
 
-		_, err = file.WriteString(strings.Join(outputUrls, "\n"))
+		_, err = file.WriteString(restabTxtRender)
 		if err != nil {
 			log.Panic().
 				Err(err).

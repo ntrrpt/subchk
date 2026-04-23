@@ -66,25 +66,25 @@ func runJobs(urls []string) chan TestResult {
 
 	go func() {
 		defer close(jobs)
-		for i, _url := range urls {
-			if _url == "" {
+		for i, u := range urls {
+			if u == "" {
 				log.Trace().
-					Int("_id", i).
+					Int("id", i).
 					Msg("empty url")
 				continue
 			}
 
-			if _, err := url.Parse(_url); err != nil {
+			if _, err := url.Parse(u); err != nil {
 				log.Trace().
-					Int("_id", i).
-					Str("url", _url).
+					Int("id", i).
+					Str("url", u).
 					Err(err).
 					Msg("invalid url")
 				continue
 			}
 
 			select {
-			case jobs <- TestJob{ID: i, URL: _url}:
+			case jobs <- TestJob{ID: i, URL: u}:
 			case <-ctx.Done():
 				log.Warn().Msg("stopped submitting jobs")
 				return
@@ -123,15 +123,15 @@ func worker(ctx context.Context, id int, jobs <-chan TestJob, results chan<- Tes
 					Int("id", result.ID).
 					Int64("ping", result.Ping)
 
-				if cfg.trace {
-					l = l.Str("url", job.URL)
-				}
-
 				if result.Speed > 0 {
 					l = l.
 						Str("transfered", result.dwLen.Format("%.2f ", "MB", false)).
 						Str("speed", result.Speed.Format("%.2f ", "MB", false)).
 						Str("duration", fmt.Sprintf("%.2fs", result.Time))
+				}
+
+				if cfg.trace {
+					l = l.Str("url", job.URL)
 				}
 
 				l.Msg(address)

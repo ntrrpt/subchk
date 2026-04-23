@@ -118,25 +118,25 @@ func main() {
 		results = append(results, res)
 	}
 
-	restab := table.NewWriter()
-	restab.SetAutoIndex(true)
-	restab.SetStyle(table.StyleColoredBright)
+	oktab := table.NewWriter()
+	oktab.SetAutoIndex(true)
+	oktab.SetStyle(table.StyleColoredBright)
 	resrow := table.Row{"rawUrl", "rawSpeed", "id", "url", "ping"}
 	if cfg.speedTest {
 		resrow = append(resrow, "speed", "time", "dwlen")
 	}
-	restab.AppendHeader(resrow)
-	restab.SetColumnConfigs([]table.ColumnConfig{
+	oktab.AppendHeader(resrow)
+	oktab.SetColumnConfigs([]table.ColumnConfig{
 		{Number: 1, Hidden: true},
 		{Number: 2, Hidden: true},
 		{Number: 4, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
 	})
 
-	errtab := table.NewWriter()
-	errtab.SetAutoIndex(true)
-	errtab.SetStyle(table.StyleColoredBlackOnRedWhite)
-	errtab.AppendHeader(table.Row{"id", "url", "error"})
-	errtab.SetColumnConfigs([]table.ColumnConfig{
+	ngtab := table.NewWriter()
+	ngtab.SetAutoIndex(true)
+	ngtab.SetStyle(table.StyleColoredBlackOnRedWhite)
+	ngtab.AppendHeader(table.Row{"id", "url", "error"})
+	ngtab.SetColumnConfigs([]table.ColumnConfig{
 		{Number: 1, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
 		{Number: 2, WidthMax: 100, WidthMaxEnforcer: text.WrapSoft},
 	})
@@ -145,7 +145,7 @@ func main() {
 
 	for _, result := range results {
 		if result.Error != nil {
-			errtab.AppendRow(table.Row{
+			ngtab.AppendRow(table.Row{
 				result.ID, urlFix(result.Url), result.Error,
 			})
 
@@ -165,22 +165,22 @@ func main() {
 
 		dwLenTotal += result.dwLen
 
-		restab.AppendRow(resInfo)
+		oktab.AppendRow(resInfo)
 	}
 
 	// filtering by zero ping
-	restab.FilterBy([]table.FilterBy{
+	oktab.FilterBy([]table.FilterBy{
 		{Name: "ping", Operator: table.NotEqual, Value: 0},
 	})
 
 	// sort by ping
-	restab.SortBy([]table.SortBy{
+	oktab.SortBy([]table.SortBy{
 		{Name: "ping", Mode: table.AscNumeric},
 	})
 
 	// filtering by speed
 	if cfg.speedTest && speedFilter != 0 {
-		restab.FilterBy([]table.FilterBy{
+		oktab.FilterBy([]table.FilterBy{
 			{
 				Number: 2,
 				CustomFilter: func(rawSpeed string) bool {
@@ -196,7 +196,7 @@ func main() {
 
 	// sort by speed
 	if cfg.speedTest && !cfg.pingSort {
-		restab.SortBy([]table.SortBy{
+		oktab.SortBy([]table.SortBy{
 			{
 				Number: 2,
 				CustomLess: func(iStr string, jStr string) int {
@@ -227,28 +227,30 @@ func main() {
 
 	}
 
-	if cfg.trace && errtab.Length() > 0 {
-		errtab.SortBy([]table.SortBy{
+	if cfg.trace && ngtab.Length() > 0 {
+		ngtab.SortBy([]table.SortBy{
 			{Number: 1, Mode: table.AscNumeric},
 		})
 
-		println(errtab.Render())
+		println(ngtab.Render())
 	}
 
-	if restab.Length() > 0 {
-		restabRender := restab.Render()
+	if oktab.Length() > 0 {
+		oktabRender := oktab.Render()
 		if cfg.resCount > 0 {
-			restab.SetPageSize(cfg.resCount)
-			restabRender = strings.SplitN(restab.Render(), "\n\n", 2)[0]
+			oktab.SetPageSize(cfg.resCount)
+			oktabRender = strings.SplitN(oktabRender, "\n\n", 2)[0]
 		}
-		println(restabRender)
+		println(oktabRender)
 	}
 
 	log.Info().
+		Int("ok", oktab.Length()).
+		Int("ng", ngtab.Length()).
 		Str("dwLenTotal", dwLenTotal.Format("%.2f ", "MB", false)).
 		Msg("finished")
 
-	// clean style without colors and borders
+	// style without colors and borders
 	emptyStyle := table.Style{
 		Name: "emptyStyle",
 		Box: table.BoxStyle{
@@ -279,8 +281,8 @@ func main() {
 		Title:   table.TitleOptionsDefault,
 	}
 
-	restab.SetAutoIndex(false)
-	restab.SetColumnConfigs([]table.ColumnConfig{
+	oktab.SetAutoIndex(false)
+	oktab.SetColumnConfigs([]table.ColumnConfig{
 		{Number: 1, Hidden: false},
 		{Number: 2, Hidden: true},
 		{Number: 3, Hidden: true},
@@ -291,11 +293,11 @@ func main() {
 		{Number: 8, Hidden: true},
 		{Number: 9, Hidden: true},
 	})
-	restab.SetStyle(emptyStyle)
-	restabTxtRender := extractRawUrl(restab.Render())
+	oktab.SetStyle(emptyStyle)
+	oktabTxtRender := extractRawUrl(oktab.Render())
 
 	//write output file
-	if cfg.outputFile != "" && len(restabTxtRender) > 0 {
+	if cfg.outputFile != "" && len(oktabTxtRender) > 0 {
 		file, err := os.Create(cfg.outputFile)
 		if err != nil {
 			log.Panic().
@@ -305,7 +307,7 @@ func main() {
 		}
 		defer file.Close()
 
-		_, err = file.WriteString(restabTxtRender)
+		_, err = file.WriteString(oktabTxtRender)
 		if err != nil {
 			log.Panic().
 				Err(err).

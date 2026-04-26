@@ -135,10 +135,6 @@ func main() {
 		results = append(results, res)
 	}
 
-	/*
-
-	 */
-
 	var dwLenTotal bytesize.ByteSize
 
 	okResults := []okResult{}

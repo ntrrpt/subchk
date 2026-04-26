@@ -4,8 +4,8 @@ go 1.26.2
 
 require (
 	github.com/akamensky/argparse v1.4.0
-	github.com/cnlangzi/proxyclient v0.0.22
-	github.com/rs/zerolog v1.35.0
+	github.com/cnlangzi/proxyclient v0.0.23
+	github.com/rs/zerolog v1.35.1
 )
 
 require (
@@ -28,7 +28,7 @@ require (
 	github.com/quic-go/quic-go v0.58.0 // indirect
 	github.com/refraction-networking/utls v1.8.1 // indirect
 	github.com/riobard/go-bloom v0.0.0-20200614022211-cdc8013cb5b3 // indirect
-	github.com/sagernet/sing v0.8.2 // indirect
+	github.com/sagernet/sing v0.8.8 // indirect
 	github.com/sagernet/sing-shadowsocks v0.2.8 // indirect
 	github.com/seiflotfy/cuckoofilter v0.0.0-20240715131351-a2f2c23f1771 // indirect
 	github.com/v2fly/ss-bloomring v0.0.0-20210312155135-28617310f63e // indirect
@@ -56,7 +56,7 @@ require (
 
 require (
 	github.com/inhies/go-bytesize v0.0.0-20220417184213-4913239db9cf
-	github.com/jedib0t/go-pretty/v6 v6.7.9
+	github.com/jedib0t/go-pretty/v6 v6.7.10
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.21 // indirect
 	golang.org/x/net v0.53.0 // indirect

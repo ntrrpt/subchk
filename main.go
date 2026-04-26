@@ -62,21 +62,22 @@ func main() {
 	var sub string
 	var err error
 
-	if cfg.outputFile != "" && cfg.serveFile != "" {
-		err = serveFile(cfg.outputFile, cfg.serveFile)
+	if cfg.serveFile != "" {
+		if !isFile(cfg.input) {
+			log.Warn().
+				Str("inputFile", cfg.input).
+				Msg("input file not exists")
+		}
+
+		err = serveFile(cfg.input, cfg.serveFile)
 		if err != nil {
 			log.Panic().
 				Err(err).
-				Str("outputFile", cfg.outputFile).
+				Str("inputFile", cfg.input).
 				Str("addr", cfg.serveFile).
 				Msg("failed to start server")
 		}
 		os.Exit(0)
-	}
-
-	if cfg.input == "" {
-		log.Fatal().
-			Msg("input file/url is empty (see -h, --help)")
 	}
 
 	speedFilter, err := bytesize.Parse(cfg.speedFilter)

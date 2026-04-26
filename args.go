@@ -35,7 +35,7 @@ func parseArgs() *Config {
 
 	/* global */
 	input := parser.String("i", "input", &argparse.Options{
-		Required: false,
+		Required: true,
 		Help:     "url or file with proxies",
 	})
 	outputFile := parser.String("o", "output", &argparse.Options{
@@ -44,7 +44,7 @@ func parseArgs() *Config {
 	})
 	serveFile := parser.String("e", "server", &argparse.Options{
 		Required: false,
-		Help:     "run http server with output file content (PORT or HOST:PORT, require -o)",
+		Help:     "serve http server with input file (PORT or HOST:PORT)",
 	})
 	threadCount := parser.Int("t", "threads", &argparse.Options{
 		Required: false,

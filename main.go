@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +18,21 @@ var (
 	log zerolog.Logger
 	cfg *Config
 )
+
+type okResult struct {
+	ID    int
+	URL   string
+	Ping  int64
+	Speed bytesize.ByteSize
+	Time  float64
+	dwLen bytesize.ByteSize
+}
+
+type ngResult struct { // not good
+	ID    int
+	URL   string
+	Error error
+}
 
 func init() {
 	cfg = parseArgs()
@@ -118,186 +134,148 @@ func main() {
 		results = append(results, res)
 	}
 
-	oktab := table.NewWriter()
-	oktab.SetAutoIndex(true)
-	oktab.SetStyle(table.StyleColoredBright)
-	resrow := table.Row{"rawUrl", "rawSpeed", "id", "url", "ping"}
-	if cfg.speedTest {
-		resrow = append(resrow, "speed", "time", "dwlen")
-	}
-	oktab.AppendHeader(resrow)
-	oktab.SetColumnConfigs([]table.ColumnConfig{
-		{Number: 1, Hidden: true},
-		{Number: 2, Hidden: true},
-		{Number: 4, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
-	})
+	/*
 
-	ngtab := table.NewWriter()
-	ngtab.SetAutoIndex(true)
-	ngtab.SetStyle(table.StyleColoredBlackOnRedWhite)
-	ngtab.AppendHeader(table.Row{"id", "url", "error"})
-	ngtab.SetColumnConfigs([]table.ColumnConfig{
-		{Number: 1, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
-		{Number: 2, WidthMax: 100, WidthMaxEnforcer: text.WrapSoft},
-	})
+	 */
 
 	var dwLenTotal bytesize.ByteSize
 
+	okResults := []okResult{}
+	ngResults := []ngResult{}
+
 	for _, result := range results {
 		if result.Error != nil {
-			ngtab.AppendRow(table.Row{
-				result.ID, urlFix(result.Url), result.Error,
-			})
 
-			continue
+			ngResults = append(ngResults,
+				ngResult{
+					result.ID,
+					urlFix(result.Url),
+					result.Error,
+				},
+			)
+
+		} else if result.Ping > 0 {
+
+			okResults = append(okResults,
+				okResult{
+					result.ID,
+					result.Url,
+					result.Ping,
+					result.Speed,
+					result.Time,
+					result.dwLen,
+				},
+			)
+
+			dwLenTotal += result.dwLen
 		}
-
-		resInfo := table.Row{
-			result.Url, result.Speed, result.ID, urlFix(result.Url), result.Ping,
-		}
-
-		if cfg.speedTest {
-			resInfo = append(resInfo,
-				result.Speed.Format("%.2f ", "MB", false),
-				fmt.Sprintf("%.2fs", result.Time),
-				result.dwLen.Format("%.2f ", "MB", false))
-		}
-
-		dwLenTotal += result.dwLen
-
-		oktab.AppendRow(resInfo)
 	}
 
-	// filtering by zero ping
-	oktab.FilterBy([]table.FilterBy{
-		{Name: "ping", Operator: table.NotEqual, Value: 0},
-	})
-
-	// sort by ping
-	oktab.SortBy([]table.SortBy{
-		{Name: "ping", Mode: table.AscNumeric},
+	sort.Slice(okResults, func(i, j int) bool {
+		return okResults[i].Ping < okResults[j].Ping
 	})
 
 	// filtering by speed
-	if cfg.speedTest && speedFilter != 0 {
-		oktab.FilterBy([]table.FilterBy{
-			{
-				Number: 2,
-				CustomFilter: func(rawSpeed string) bool {
-					b, err := bytesize.Parse(rawSpeed)
-					if err == nil && b != 0 && b >= speedFilter {
-						return true
-					}
-					return false
-				},
-			},
-		})
+	if cfg.speedTest && speedFilter > 0 {
+		filtered := okResults[:0]
+
+		for _, res := range okResults {
+			if res.Speed >= speedFilter {
+				filtered = append(filtered, res)
+			}
+		}
+
+		okResults = filtered
 	}
 
 	// sort by speed
 	if cfg.speedTest && !cfg.pingSort {
-		oktab.SortBy([]table.SortBy{
-			{
-				Number: 2,
-				CustomLess: func(iStr string, jStr string) int {
-					iNum, iErr := bytesize.Parse(iStr)
-					jNum, jErr := bytesize.Parse(jStr)
-
-					if iErr != nil || jErr != nil {
-						// fallback to string comparison if not numeric
-						if iStr < jStr {
-							return 1
-						}
-						if iStr > jStr {
-							return -1
-						}
-						return 0
-					}
-
-					if iNum < jNum {
-						return 1
-					}
-					if iNum > jNum {
-						return -1
-					}
-					return 0
-				},
-			},
+		sort.Slice(okResults, func(i, j int) bool {
+			return okResults[i].Speed > okResults[j].Speed
 		})
-
 	}
 
-	if cfg.trace && ngtab.Length() > 0 {
-		ngtab.SortBy([]table.SortBy{
-			{Number: 1, Mode: table.AscNumeric},
+	// err table
+	if cfg.trace && len(ngResults) > 0 {
+		sort.Slice(ngResults, func(i, j int) bool {
+			return ngResults[i].ID < ngResults[j].ID
 		})
+
+		ngCols := []func(ngResult) any{
+			func(r ngResult) any { return r.ID },
+			func(r ngResult) any { return urlFix(r.URL) },
+			func(r ngResult) any { return r.Error },
+		}
+
+		ngResultsAny := MapTable(ngResults, ngCols)
+
+		ngtab := table.NewWriter()
+		ngtab.SetAutoIndex(true)
+		ngtab.SetStyle(table.StyleColoredBlackOnRedWhite)
+		ngtab.AppendHeader(table.Row{"id", "url", "error"})
+		ngtab.SetColumnConfigs([]table.ColumnConfig{
+			{Number: 1, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
+			{Number: 2, WidthMax: 100, WidthMaxEnforcer: text.WrapSoft},
+		})
+		ngtab.ImportGrid(ngResultsAny)
 
 		println(ngtab.Render())
 	}
 
-	if oktab.Length() > 0 {
-		oktabRender := oktab.Render()
-		if cfg.resCount > 0 {
-			oktab.SetPageSize(cfg.resCount)
-			oktabRender = strings.SplitN(oktabRender, "\n\n", 2)[0]
+	if len(okResults) > 0 {
+		okCols := []func(okResult) any{
+			func(r okResult) any { return r.ID },
+			func(r okResult) any { return urlFix(r.URL) },
+			func(r okResult) any { return r.Ping },
+			func(r okResult) any { return r.Speed.Format("%.2f ", "MB", false) },
+			func(r okResult) any { return fmt.Sprintf("%.2fs", r.Time) },
+			func(r okResult) any { return r.dwLen.Format("%.2f ", "MB", false) },
 		}
-		println(oktabRender)
+
+		okResultsAny := MapTable(okResults, okCols)
+
+		if cfg.resCount > 0 && len(okResultsAny) > cfg.resCount {
+			okResultsAny = okResultsAny[:cfg.resCount]
+		}
+
+		oktab := table.NewWriter()
+		oktab.SetAutoIndex(true)
+		oktab.SetStyle(table.StyleColoredBright)
+		oktab.AppendHeader(table.Row{"id", "url", "ping", "speed", "time", "dwlen"})
+		oktabCfg := []table.ColumnConfig{
+			{Number: 2, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
+		}
+		if !cfg.speedTest {
+			oktabCfg = []table.ColumnConfig{
+				{Number: 2, WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
+				{Number: 4, Hidden: true},
+				{Number: 5, Hidden: true},
+				{Number: 6, Hidden: true},
+			}
+		}
+		oktab.SetColumnConfigs(oktabCfg)
+
+		oktab.ImportGrid(okResultsAny)
+
+		println(oktab.Render())
 	}
 
 	log.Info().
-		Int("ok", oktab.Length()).
-		Int("ng", ngtab.Length()).
+		Int("ok", len(okResults)).
+		Int("ng", len(ngResults)).
 		Str("dwLenTotal", dwLenTotal.Format("%.2f ", "MB", false)).
 		Msg("finished")
 
-	// style without colors and borders
-	emptyStyle := table.Style{
-		Name: "emptyStyle",
-		Box: table.BoxStyle{
-			BottomLeft:       "",
-			BottomRight:      "",
-			BottomSeparator:  "",
-			EmptySeparator:   "",
-			Left:             "",
-			LeftSeparator:    "",
-			MiddleHorizontal: "",
-			MiddleSeparator:  "",
-			MiddleVertical:   "",
-			PaddingLeft:      "",
-			PaddingRight:     "",
-			PageSeparator:    "",
-			Right:            "",
-			RightSeparator:   "",
-			TopLeft:          "",
-			TopRight:         "",
-			TopSeparator:     "",
-			UnfinishedRow:    "",
-		},
-		Color:   table.ColorOptionsDefault,
-		Format:  table.FormatOptionsDefault,
-		HTML:    table.DefaultHTMLOptions,
-		Options: table.OptionsNoBordersAndSeparators,
-		Size:    table.SizeOptionsDefault,
-		Title:   table.TitleOptionsDefault,
-	}
+	// write output file
+	if cfg.outputFile != "" && len(okResults) > 0 {
+		var outputUrls []string
 
-	oktab.SetAutoIndex(false)
-	oktab.SetColumnConfigs([]table.ColumnConfig{
-		{Number: 1, Hidden: false},
-		{Number: 2, Hidden: true},
-		{Number: 3, Hidden: true},
-		{Number: 4, Hidden: true},
-		{Number: 5, Hidden: true},
-		{Number: 6, Hidden: true},
-		{Number: 7, Hidden: true},
-		{Number: 8, Hidden: true},
-		{Number: 9, Hidden: true},
-	})
-	oktab.SetStyle(emptyStyle)
-	oktabTxtRender := extractRawUrl(oktab.Render())
+		for i, res := range okResults {
+			if cfg.resCount == 0 || i < cfg.resCount {
+				outputUrls = append(outputUrls, res.URL)
+			}
+		}
 
-	//write output file
-	if cfg.outputFile != "" && len(oktabTxtRender) > 0 {
 		file, err := os.Create(cfg.outputFile)
 		if err != nil {
 			log.Panic().
@@ -307,7 +285,7 @@ func main() {
 		}
 		defer file.Close()
 
-		_, err = file.WriteString(oktabTxtRender)
+		_, err = file.WriteString(strings.Join(outputUrls, "\n"))
 		if err != nil {
 			log.Panic().
 				Err(err).

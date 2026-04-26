@@ -17,33 +17,25 @@ type base64Url struct {
 	Host string `json:"host"`
 }
 
+// convert []structs to [][]any for table.ImportGrid
+func MapTable[T any](data []T, cols []func(T) any) [][]any {
+	out := make([][]any, 0, len(data))
+
+	for _, row := range data {
+		record := make([]any, len(cols))
+
+		for i, col := range cols {
+			record[i] = col(row)
+		}
+
+		out = append(out, record)
+	}
+
+	return out
+}
+
 // for unused vars
 func U(x ...any) {}
-
-/*
-extracts first page from table with "RAWURL" column header
-
-	RAWURLxxxxxxxxxxxxRAWURLyyyyyyyy => xxxxxxxxxxxx
-	RAWURLzzzzzzzzzzzz => zzzzzzzzzzzz
-*/
-func extractRawUrl(s string) string {
-	const marker = "RAWURL"
-
-	start := strings.Index(s, marker)
-	if start == -1 {
-		return ""
-	}
-
-	start += len(marker)
-
-	end := strings.Index(s[start:], marker)
-
-	if end == -1 {
-		return strings.TrimSpace(s[start:])
-	}
-
-	return strings.TrimSpace(s[start : start+end])
-}
 
 // {float,string} to integer
 func (b *base64Url) UnmarshalJSON(data []byte) error {
@@ -80,7 +72,7 @@ func (b *base64Url) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// return "scheme://host:port" from proxy url
+// return "scheme://host:port" from v2ray url
 func urlFix(u string) string {
 	ret := u
 	isBase64 := ""

@@ -12,9 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cnlangzi/proxyclient"
 	"github.com/inhies/go-bytesize"
 
+	"github.com/cnlangzi/proxyclient"
+	_ "github.com/cnlangzi/proxyclient/ss"
 	_ "github.com/cnlangzi/proxyclient/xray"
 )
 

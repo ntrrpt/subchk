@@ -39,6 +39,12 @@ func parseAddr(input string) (string, error) {
 }
 
 func serveFile(filePath string, addrArg string) error {
+	if !isFile(filePath) {
+		log.Warn().
+			Str("filePath", filePath).
+			Msg("input file not exists")
+	}
+
 	addr, err := parseAddr(addrArg)
 	if err != nil {
 		log.Fatal().

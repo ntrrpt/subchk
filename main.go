@@ -63,12 +63,6 @@ func main() {
 	var err error
 
 	if cfg.serveFile != "" {
-		if !isFile(cfg.input) {
-			log.Warn().
-				Str("inputFile", cfg.input).
-				Msg("input file not exists")
-		}
-
 		err = serveFile(cfg.input, cfg.serveFile)
 		if err != nil {
 			log.Panic().

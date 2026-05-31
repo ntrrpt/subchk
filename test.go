@@ -15,6 +15,7 @@ import (
 	"github.com/inhies/go-bytesize"
 
 	"github.com/cnlangzi/proxyclient"
+	_ "github.com/cnlangzi/proxyclient/hy2"
 	_ "github.com/cnlangzi/proxyclient/ss"
 	_ "github.com/cnlangzi/proxyclient/xray"
 )
